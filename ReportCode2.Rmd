@@ -77,7 +77,7 @@ Fortunately, we do not have NA values in any of the columns. We can proceed with
 
 For an unbiased ethical model, the gender of a person should not have any effect on the charges that the person has to pay for insurance. However, given the fact that the person smokes or not, might be an important feature. Let us check if that is the case. 
 
-```{r, echo=FALSE, fig.height= 4, fig.width=5.5}
+```{r, echo=FALSE, fig.height= 4, fig.width=5.5,  fig.align='center'}
 plot1 <-ggplot(df, aes(x = smoker, y = charges, fill = smoker)) +
   geom_boxplot() +
   labs(title = "Charges v/s Smoking",
@@ -94,7 +94,7 @@ plot2<-ggplot(df, aes(x = region, y = charges, fill = region)) +
 grid.arrange(plot1, plot2,ncol = 2, widths = c(10,10))
 ```
 
-The above plot shows a boxplot of charges versus smoking status and region. From the plot, we can make the following conclusions : 
+The figure above shows a boxplot of charges versus smoking status and region. From the plot, we can make the following conclusions : 
 
 - Smokers tend to have higher charges than non-smokers:  This is evident from the fact that the median charge for smokers is much higher than the median charge for non-smokers in all three regions.
 - There is a regional variation in charges: The median charge is highest in the Northeast and lowest in the Southwest.
@@ -113,7 +113,7 @@ However, on running a code snippet, the results above indicate otherwise. This m
 Let us check if these findings are reported by correlation with the help of a heatmap.
 
 
-```{r , echo=FALSE,fig.width=6}
+```{r , echo=FALSE,fig.width=6, fig.align='center'}
 #Perform one-hot encoding for categorical variables
 encoded_data <- model.matrix(~ sex + smoker +region, data = df)
 # Combine encoded data with numeric variables
@@ -208,9 +208,11 @@ Where:
 
 ```{r, echo=FALSE}
 lr <- lm(charges ~ age + sex + bmi + children + smoker + region, data=train_data)
-lrprediction <- predict(lr, newdata = test_data)
+predictions_lr <- predict(lr, newdata = test_data)
 
 r_squared_lr <- summary(lr)$r.squared
+rmse_lr <- sqrt(mean((predictions_lr - test_data$charges)^2))
+
 ```
 
 ## GLMNET :
@@ -241,18 +243,15 @@ final_model <- glmnet(X_train, y_train, alpha = best_alpha, lambda = best_lambda
 X_test <- as.matrix(test_data[, -which(names(test_data) == "charges")])
 predictions_glmnet <- predict(final_model, newx = X_test)
 
-# Evaluate the model
-mse <- mean((predictions_glmnet - test_data$charges)^2)
-rmse <- sqrt(mse)
-
-
 r_squared_glmnet <- 1 - sum((test_data$charges - predictions_glmnet)^2) / sum((test_data$charges - mean(test_data$charges))^2)
+
+rmse_glmnet <- sqrt(mean((predictions_glmnet - test_data$charges)^2))
 
 ```
 
 ### XGBOOST:
 
-XGBoost, or Extreme Gradient Boosting, is a powerful machine learning algorithm known for its efficiency and effectiveness in handling diverse datasets. The algorithm sequentially builds a series of decision trees, each correcting the errors of the previous one, ultimately creating a strong ensemble model. We create a grid of hyperparameter values, such as the learning rate (eta), maximum depth of trees (max_depth), and some others. For each combination of hyperparameters, the code then calculates the corresponding R-squared values, and finally we select the set of hyperparameters that yield the highest R-squared. This process aids in optimizing the XGBoost model's configuration for accurate predictions on the insurance dataset. 
+XGBoost, or Extreme Gradient Boosting, is a powerful machine learning algorithm renowned for its efficiency and effectiveness in handling diverse datasets. The algorithm sequentially builds a series of decision trees, each correcting the errors of the previous one, ultimately creating a strong ensemble model. Here we create a grid of hyperparameter values, such as the learning rate (eta), maximum depth of trees (max_depth), and other relevant parameters. XGBoost allows for the inclusion of additional hyperparameters like subsample and colsample_bytree, providing a fine-tuned control over the model's behavior. For each combination of hyperparameters, the code calculates the corresponding R-squared values, and our approach extends to evaluating other performance metrics, enabling a comprehensive understanding of the model's behavior. Finally, we select the set of hyperparameters that yield the highest R-squared. This iterative optimization process significantly contributes to refining the XGBoost model's configuration, ensuring its accuracy in predicting insurance-related variables. Beyond its performance on insurance datasets, XGBoost finds applications across various domains, such as finance, healthcare, and marketing, showcasing its versatility and effectiveness in solving complex problems and making it a widely adopted tool in the data science community.
 
 ```{r, echo = FALSE}
 # Function to train and evaluate XGBoost model for a given set of hyperparameters
@@ -294,12 +293,25 @@ results <- param_grid %>%
 
 # Select the row with the highest R-squared value
 best_row <- results[which.max(results$r_squared), ]
-predictions_xgboost <- results$predictions_xgboost
 r_squared_xgboost <- best_row$r_squared
+
+# CREATE THE MODEL WITH BEST PARAMETERS
+best_params <- expand.grid(
+  eta = best_row$eta,
+  max_depth = best_row$max_depth,
+  min_child_weight = best_row$min_child_weight,
+  subsample = best_row$subsample,
+  colsample_bytree = best_row$colsample_bytree
+)
+best_XGBmodel <- train_and_evaluate(as.list(best_params))
+xgboost_predictions <- best_XGBmodel$predictions_xgboost
+rmse_xgboost <- sqrt(mean((xgboost_predictions - test_data$charges)^2))
 ```
+
 ### Random Forest:
 
-Random Forest is an ensemble learning algorithm widely used for both classification and regression tasks. It builds multiple decision trees during training and combines their predictions to enhance overall accuracy and robustness. The key concept lies in introducing randomness during both the construction of individual trees and the selection of features used for splitting nodes. This randomness helps reduce overfitting and improves the model's generalization performance. The final prediction is often obtained by averaging or taking a majority vote of the predictions made by individual trees. R provides the 'randomForest' package, which as the name suggests, provides the functionality to implement a Random Forest model.
+Random Forest is an ensemble learning algorithm widely used for both classification and regression tasks. It builds multiple decision trees during training and combines their predictions to enhance overall accuracy and robustness. The key concept lies in introducing randomness during both the construction of individual trees and the selection of features used for splitting nodes. This randomness helps reduce overfitting and improves the model's generalization performance.  Random Forest introduces the concept of out-of-bag error, where each tree is trained on a subset of the data, leaving out about one-third of the observations. The omitted samples can then be used to estimate the model's performance without the need for a separate validation set, providing an internal validation method. The final prediction is often obtained by averaging or taking a majority vote of the predictions made by individual trees. R provides the 'randomForest' package, which as the name suggests, provides the functionality to implement a Random Forest model.
+
 ```{r, echo=FALSE}
 # Fit a random forest model
 rf_model <- randomForest(
@@ -310,11 +322,13 @@ rf_model <- randomForest(
 rf_predictions <- predict(rf_model, newdata = test_data)
 
 r_squared_rf <- 1 - sum((test_data$charges - rf_predictions)^2) / sum((test_data$charges - mean(test_data$charges))^2)
+rmse_rf <- sqrt(mean((rf_predictions - test_data$charges)^2))
 
 ```
 
 ### Support Vector Machine: 
-SVM is a supervised learning algorithm that works by finding a hyperplane in the feature space that best separates different classes or, in the case of regression, predicts the target variable. The resulting SVM model is then used to make predictions on the test set, and performance metrics such as root mean squared error (RMSE) and R-squared are computed to assess the accuracy of the predictions. SVMs are particularly effective in handling non-linear relationships and are robust in high-dimensional spaces, making them suitable for various machine learning tasks. Here, we utilize the 'e1071' package in R to implement a Support Vector Machine (SVM) for regression. 
+
+Support Vector Machines (SVM) is a powerful supervised learning algorithm that operates by identifying a hyperplane within the feature space that optimally separates different classes in classification tasks or predicts the target variable in regression scenarios. The SVM model generated through this process is then employed to make predictions on the test set. To evaluate the accuracy of these predictions, metrics such as root mean squared error (RMSE) and R-squared are calculated. SVMs show remarkable effectiveness in handling non-linear relationships within the data, providing a valuable tool for capturing complex patterns. Their robustness in high-dimensional spaces makes SVMs well-suited for diverse machine learning tasks. In this analysis, the 'e1071' package in R is leveraged to implement a Support Vector Machine specifically tailored for regression, showcasing the algorithm's adaptability across a wide range of learning scenarios and in finding meaningful insights from complex datasets.
 
 ```{r, echo=FALSE}
 library(e1071)
@@ -324,12 +338,13 @@ svm_model <- svm(charges ~ age + sex + bmi + children + smoker + region, data = 
 # Make predictions on the test_data
 svm_predictions <- predict(svm_model, newdata = test_data[, c("age", "sex", "bmi", "children", "smoker", "region")])
 
-rmse <- sqrt(mean((svm_predictions - test_data$charges)^2))
+rmse_svm <- sqrt(mean((svm_predictions - test_data$charges)^2))
 r_squared_svm <- 1 - sum((test_data$charges - svm_predictions)^2) / sum((test_data$charges - mean(test_data$charges))^2)
-
 ```
 
-```{r, echo=FALSE, warning=FALSE}
+# ANALYSIS OF RESULTS :
+
+```{r, echo=FALSE, warning=FALSE, fig.align='center'}
 #glmnet predictions has column s0, need to rename for ease of visualization
 # Assuming predictions_glmnet is a vector
 predictions_glmnet <- as.vector(predictions_glmnet)
@@ -338,43 +353,72 @@ predictions_glmnet <- as.vector(predictions_glmnet)
 names(predictions_glmnet) <- "GLMNET"
 combined_data <- data.frame(
   Actual = test_data$charges,
-  XGBOOST = predictions_xgboost,
+  XGBOOST = xgboost_predictions,
   SVM = svm_predictions,
-  RF = rf_predictions,
-  LM = lrprediction,
+  RandomForest = rf_predictions,
+  LinearRegression = predictions_lr,
   GLMNET = predictions_glmnet
 )
 
 combined_data_long <- gather(combined_data, key = "Model", value = "Predicted", -Actual)
 
-ggplot(combined_data_long, aes(x = Predicted, y = Actual)) +
+plot<-ggplot(combined_data_long, aes(x = Predicted, y = Actual)) +
   geom_point(aes(color = Model), alpha = 0.8) +
   geom_smooth(method = "lm", formula = y ~ x, color = "darkslategray", size = 1, se = FALSE, show.legend = FALSE) +
   facet_wrap(~Model, scales = "fixed") +
   ggtitle("Prediction vs Actual Charges for ML Models")+
   theme(axis.text.x=element_blank(),
-        axis.ticks.x=element_blank())
+        axis.ticks.x=element_blank(),
+        axis.text.y=element_blank(),
+        axis.ticks.y=element_blank(),
+        plot.title = element_text(hjust = 0.5), legend.position = 'none')
 
+plot
 ```
 
-# ANALYSIS OF RESULTS :
-```{r}
+In the comprehensive examination of machine learning model performances, the scatter plots and associated fitted regression lines offer valuable insights. Notably, GLMNET and Linear Regression emerge as less effective models, as evident by a noticeable divergence of points from the regression line, indicating suboptimal predictions. On the contrary, Random Forests, Support Vector Machines (SVM), and XGBoost showcase commendable predictive capabilities, with the observed points closely adhering to the regression line. Of particular interest is the remarkable similarity in performance between Random Forests and SVM, suggesting a comparable proficiency in predicting actual values. While on further precise observation, it appears that XGBoost was the winner. In the case of SVM and Random Forests, we see some points being away from the line around the middle region, which is not the case with XGBoost. This visual analysis showcases the effectiveness of different models, providing a subtle understanding of their predictive power and highlighting the strengths and weaknesses in each model.  
+$\\ \\ \\$
+
+```{r, echo=FALSE, fig.width=14}
 
 # Create a data frame with model names and R-squared values
 model_names <- c("Linear Regression", "GLMNET", "SVM", "Random Forest","XGBoost")
 r_squared_values <- c(r_squared_lr, r_squared_glmnet, r_squared_svm, r_squared_rf, r_squared_xgboost)
+rmse_values <- c(rmse_lr, rmse_glmnet , rmse_svm, rmse_rf, rmse_xgboost )
 df <- data.frame(Model = model_names, R_squared = r_squared_values)
 
-# Plot the bar graph
-library(ggplot2)
 
-ggplot(df, aes(x = Model, y = R_squared, fill = Model)) +
+plot_rsq <- ggplot(df, aes(x = Model, y = R_squared, fill = Model)) +
   geom_bar(stat = "identity", position = "dodge") +
   labs(title = "Comparison of R-squared Values",
        x = "Models",
        y = "R-squared") +
-  theme_minimal()
+  theme_minimal()+
+  theme(plot.title = element_text(hjust = 0.5))
 
-```
 
-## DIDNT PRINT R-SQUARED ABOVE, DO ALL TOGETHER FOR COMPARISON
+plot_rmse <- ggplot(df, aes(x = Model, y = rmse_values, fill = Model)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  labs(title = "Comparison of Root Mean Squared Error",
+       x = "Models",
+       y = "RMSE") +
+  theme_minimal()+
+  theme(plot.title = element_text(hjust = 0.5))
+
+
+grid.arrange(plot_rsq, plot_rmse, ncol = 2)
+```  
+$\\ \\ \\ \\ \\$
+
+Based on the above barplots, the XGBoost model has the highest R-squared value, followed by SVM and then Random Forest. This suggests that the XGBoost model is able to explain the most variation in the target variable. GLMNET and Linear Regression are both good regression models, but they are not as powerful as the other three. GLMNET is able to handle non-linear relationships between features and the target variable, while Linear Regression assumes that the relationships are linear. XGBoost is able to handle both linear and non-linear relationships, as well as complex interactions between features.
+
+Another thing to note is that the XGBoost model has the lowest RMSE value, which is another metric for evaluating model performance. RMSE measures the average difference between the predicted and actual values, and a lower RMSE value indicates that the model is making more accurate predictions. There was a close competition between Random Forests and SVM, in both cases of R-squared and RMSE. Overall, the XGBoost model is the best model for the data, as it has the highest R-squared value and the lowest RMSE value. It is a powerful and versatile model that is able to handle a wide range of regression problems.
+$\\ \\$
+
+# CONCLUSION : 
+
+After performing several exploratory data analysis, we tested various machine learning models to see how well they could make predictions on the insurance charges based on the various other features. We used different algorithms like GLMNET, Linear Regression, Random Forests, Support Vector Machines (SVM), and XGBoost. We measured how accurate the predictions were using metrics like mean squared error and R-squared values.
+
+After looking at our results, it's clear that some models did better than others. GLMNET and Linear Regression didn't perform as well as we hoped since they had trouble capturing the patterns in the data. On the other hand, Random Forests, SVM, and XGBoost performed well, showing that they're effective in making predictions.
+
+We also learned that XGBoost is pretty versatile. It can handle different types of relationships in the data, which is a useful feature. Also, since RMSE was lowest and R-squared was highest for XGBoost, we conclude that the best model out of the ones that were used in the project is XGBoost, for this particular dataset. Overall, this project has equipped us with valuable insights on selecting effective tools for predicting medical insurance costs, enhancing our preparedness for similar challenges ahead.
