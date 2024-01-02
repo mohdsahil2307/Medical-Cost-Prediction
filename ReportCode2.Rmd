@@ -1,0 +1,380 @@
+---
+title: "Medical Insurance Cost Prediction"
+author: "Sahil Mohammad"
+geometry: "left=2cm,right=2cm,top=1cm,bottom=1cm"
+output: pdf_document
+---
+<style>
+  /* Center the title */
+  h1.title {
+    text-align: center;
+  }
+</style>
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE)
+library(ggplot2)
+library(tidyverse)
+library(readr)
+library(corrplot)
+library(cowplot)
+library(viridis)
+library(caret)
+library(rpart)
+library(rpart.plot)
+library(randomForest)
+library(reshape2)
+library(xgboost)
+library(gridExtra)
+library(glmnet)
+library(randomForest)
+
+df <- read_csv("data/insurance.csv")
+```
+
+# Introduction
+
+The healthcare landscape has seen a significant cost increase over the last decade, primarily due to rising healthcare service expenses. Various factors influence healthcare costs which are covered in the dataset being examined. These factors are as follows :
+
+* age: age of primary beneficiary
+
+* Sex: insurance contractor gender, female, male
+
+* BMI: Body mass index, providing an understanding of body, weights that are relatively high or low relative to height,
+objective index of body weight (kg / m ^ 2) using the ratio of height to weight, ideally 18.5 to 24.9
+
+* Children: Number of children covered by health insurance / Number of dependents
+
+* Smoker: Smoking
+
+* Region: the beneficiary's residential area in the US, northeast, southeast, southwest, northwest.
+
+* Charges: Individual medical costs billed by health insurance
+
+The goal of this project is to analyze how these features impact healthcare charges and how can they be predicted for a sample of the population.
+
+# The associated Insurance Problem
+
+The rising costs of healthcare services pose a significant challenge in today's society, suggesting a growing need for a good understanding of the factors that contribute to health insurance expenses. This project tries to solve the problem of predicting health insurance costs by leveraging a dataset, consisting of crucial variables. By analyzing key factors as mentioned above, we aim to connect together the various elements that influence healthcare expenditure.
+
+The primary motivation behind this project lies in the imperative to understand the dynamics of healthcare costs. As medical expenses continue to rise, a predictive model can offer valuable insights into the underlying patterns and relationships that drive these costs. By using data science and predictive analytics, the project aims to provide a helpful model that can be used by any individual to predict the insurance cost that needs to be paid. The outcomes of this project can potentially inform policy adjustments, aid in the development of targeted medical methods, and assist individuals in making informed choices regarding their insurance coverage. As we investigate and explore the dataset, we anticipate solving the patterns that drive the insurance cost.
+
+
+# Dataset Exploration
+
+For any further Machine Learning algorithms, it is important to see which features are categorical and which are numerical:
+
+```{r, echo = FALSE}
+sapply(df, class)
+dim(df)
+```
+We check the class of each column of the dataset along with the dimensions. It is clear that the data comprises of 1,338 rows and 7 columns. Here we see that sex, smoker and region features are categorical while the others are numerical. Another important check is for missing data. Incomplete data can significantly affect the effective analysis and interpretation of data, potentially leading to misleading conclusions and wrong results. Checking for missing data is therefore a vital step in machine learning. Identifying and addressing these missing values is crucial for maintaining data integrity, ensuring model performance, and enabling informed decision-making. Thus, we check for columns that contain any missing values: 
+
+```{r, echo=FALSE}
+colSums(is.na(df))
+```
+Fortunately, we do not have NA values in any of the columns. We can proceed with further explorations.
+
+For an unbiased ethical model, the gender of a person should not have any effect on the charges that the person has to pay for insurance. However, given the fact that the person smokes or not, might be an important feature. Let us check if that is the case. 
+
+```{r, echo=FALSE, fig.height= 4, fig.width=5.5}
+plot1 <-ggplot(df, aes(x = smoker, y = charges, fill = smoker)) +
+  geom_boxplot() +
+  labs(title = "Charges v/s Smoking",
+       x = "Smoker",
+       y = "Charges",
+       fill = "Smoker")
+plot2<-ggplot(df, aes(x = region, y = charges, fill = region)) +
+  geom_boxplot() +
+  labs(title = "Charges v/s Region",
+       x = "Regions",
+       y = "Charges",
+       fill = "region")+
+      theme(axis.text.x = element_blank())
+grid.arrange(plot1, plot2,ncol = 2, widths = c(10,10))
+```
+
+The above plot shows a boxplot of charges versus smoking status and region. From the plot, we can make the following conclusions : 
+
+- Smokers tend to have higher charges than non-smokers:  This is evident from the fact that the median charge for smokers is much higher than the median charge for non-smokers in all three regions.
+- There is a regional variation in charges: The median charge is highest in the Northeast and lowest in the Southwest.
+Also, given that the charges are highest in the Northeast, let us check it is also the region with most number of smokers, in other words, if there is a correlation between the two features. 
+```{r, echo = FALSE}
+max_smokers_region <- df %>%
+  group_by(region) %>%
+  summarise(total_smokers = sum(smoker == "yes")) %>%
+  filter(total_smokers == max(total_smokers)) %>%
+  pull(region)
+
+cat("The region with the maximum number of smokers is:", max_smokers_region, "\n")
+```
+However, on running a code snippet, the results above indicate otherwise. This means there are other factors due to which Northeast has higher charges.
+
+Let us check if these findings are reported by correlation with the help of a heatmap.
+
+
+```{r , echo=FALSE,fig.width=6}
+#Perform one-hot encoding for categorical variables
+encoded_data <- model.matrix(~ sex + smoker +region, data = df)
+# Combine encoded data with numeric variables
+combined_data <- cbind(encoded_data, df[, c("age", "bmi", "children", "charges")])
+# Calculate the correlation matrix
+correlation_matrix <- cor(combined_data)
+
+# Heatmap of the correlation matrix
+heatmap(correlation_matrix, 
+        Rowv = NA, Colv = NA,
+        col = colorRampPalette(c("blue", "white", "red"))(100),
+        margins = c(5, 5),
+        main = "Correlation Heatmap")
+```
+
+We see that there are no features that are very highly correlated. However, as expected, we see that smokers tend to pay more and we see the correlation between smoker("yes") and charges.
+
+We now check the distribution of various features : 
+
+```{r, echo=FALSE}
+# Distribution of Charges
+plot1<-ggplot(df, aes(x = charges)) +
+  geom_histogram(binwidth = 1000, fill = "blue", color = "black", alpha = 0.7) +
+  labs(title = "Distribution of Charges", x = "Charges", y = "Count")
+
+plot2<- ggplot(df, aes(x = age)) +
+  geom_histogram(binwidth = 1, fill = "green", color = "black", alpha = 0.7) +
+  labs(title = "Distribution of Ages", x = "Age", y = "Count")
+
+plot3<- ggplot(df, aes(x = bmi)) +
+  geom_histogram(binwidth = 1, fill = "red", color = "black", alpha = 0.7) +
+  labs(title = "Distribution of BMI", x = "BMI", y = "Count")
+
+
+plot4<- ggplot(df, aes(x = children)) +
+  geom_histogram(binwidth = 1, fill = "red", color = "black", alpha = 0.7) +
+  labs(title = "Distribution of Children", x = "Children", y = "Count")
+
+grid.arrange(plot1, plot2, plot3, plot4 ,ncol = 2, nrow = 2, widths = c(10,10))
+```
+
+The distributions of features are important to see because we get an idea of the general trends. 
+
+- Regarding Charges, we see that most of the people pay below 20,000 USD. However, there are some individuals who pay above 60,000 USD. Thus, we can say that the distribution is right skewed.
+- When it comes to ages, we see there are a lot of people below 20, but after that we see it is more of a uniform distribution. With roughly around 30 people from each age.
+- BMI clearly follows a normal distribution with mean around 30. This is consistent with the normal distribution of BMI in the general population.
+- Moreover, considering the number of children, we see that most of the people do not have any children. The distribution is clearly right-skewed. This indicates that there are more individuals with zero children than individuals with one or more children. This pattern aligns with the general population distribution, where most people do not have children.
+
+The aim of the project is to use all the features that were explored above, correctly and effectively to predict the amount that the person needs to pay for a medical insurance. However, to run any machine learning algorithm, it is important to treat and convert the categorical variables into some encoded form. The output below shows the encoding of the categorical variables to a numeric form, making them suitable for use in predictive modeling for medical insurance charges: 
+
+
+```{r, echo=FALSE}
+
+encode <- function(x, order = unique(x)){
+  x <- as.numeric(factor(x, levels = order, exclude = NULL))
+  x
+}
+encoded_df <- df
+encoded_df[["sex"]] <- encode(df[["sex"]])
+encoded_df[["smoker"]] <- encode(df[["smoker"]])
+encoded_df[["region"]] <- encode(df[["region"]])
+print(head(encoded_df))
+```
+We can clearly see that the Categorical variables are now encoded to integers. Here, sex is 1 for females and 2 for males. Smoker is 1 if "yes" and 2 if "No". Also, different regions are encoded based on different order levels.
+
+
+```{r, echo= FALSE}
+# Next, set a seed for reproducibility
+set.seed(123)
+
+# Split the data into a training set and a test set with a 80-20 split
+split_index <- createDataPartition(encoded_df$charges, p = 0.8, list = FALSE)
+train_data <- encoded_df[split_index, ]
+test_data <- encoded_df[-split_index, ]
+```
+
+# Machine Learning Models: 
+The data was divided into a training and test set with a 80-20 split. These sets have been used for each of the models below.
+
+### Linear Regression: 
+The linear regression model is utilized here to predict medical insurance charges. The model aims to capture the linear relationship between the response variable, "Charges," and the different features which are the predictor variables. These predictors are selected based on their potential influence on insurance costs, and the model estimates coefficients for each predictor, indicating the expected change in charges associated with a one-unit change in the corresponding variable. Additionally, the model calculates an intercept term, representing the estimated charges when all predictors are zero. Model performance is assessed using metrics like R-squared, providing insight into the proportion of variance in charges explained by the predictors. Once trained, the model can be applied to new data to make predictions, offering valuable insights into the factors contributing to medical insurance costs.
+
+The general equation for a simple linear regression model is given by:
+
+\[ Y = \beta_0 + \beta_1 X1 + \beta_2 X2 + ... + \beta_p Xp + \varepsilon \]
+
+Where:
+
+- \( Y \) is the response variable. \( \beta_0 \) is the intercept term. \( X_1, X_2, \ldots, X_p \) are different predictor variables.
+- \( \beta_1, \beta_2, \ldots, \beta_p \) are the corresponding coefficients and \( \varepsilon \) is the error term.
+
+
+```{r, echo=FALSE}
+lr <- lm(charges ~ age + sex + bmi + children + smoker + region, data=train_data)
+lrprediction <- predict(lr, newdata = test_data)
+
+r_squared_lr <- summary(lr)$r.squared
+```
+
+## GLMNET :
+GLMNET, short for Generalized Linear Models with L1 and L2 Regularization, is a regression analysis technique that combines the principles of linear regression with regularization methods. It is particularly useful when dealing with high-dimensional datasets where the number of predictor variables is large. GLMNET simultaneously performs variable selection and regularization by minimizing a combination of the least squares term and penalties for the absolute values of the coefficients (L1 regularization) and their squares (L2 regularization). In this project, we utilise Cross-validation using the 'cv.glmnet' function to identify the optimal values for the regularization parameters, lambda, and alpha. Lambda controls the overall strength of regularization, while alpha determines the mix between L1 (lasso) and L2 (ridge) penalties. We then extract the best lambda value and, if applicable, the corresponding alpha. Finally the model is then used to make predictions on a separate test set, and performance metrics are computed to evaluate the model's effectiveness in predicting the response variable.
+
+```{r, echo = FALSE}
+# Load necessary libraries
+library(glmnet)
+
+# Convert the response variable to a matrix
+y_train <- as.matrix(train_data$charges)
+
+# Create a matrix of predictor variables
+X_train <- as.matrix(train_data[, -which(names(train_data) == "charges")])
+
+# Set up the cross-validation
+cv_model <- cv.glmnet(X_train, y_train)
+
+# Identify the best lambda value
+best_lambda <- cv_model$lambda.min
+
+best_alpha <- ifelse(length(cv_model$glmnet.fit$alpha) > 0, cv_model$glmnet.fit$alpha, 0.5)
+
+# Fit the final glmnet model with the selected parameters
+final_model <- glmnet(X_train, y_train, alpha = best_alpha, lambda = best_lambda)
+
+# Make predictions on the test set
+X_test <- as.matrix(test_data[, -which(names(test_data) == "charges")])
+predictions_glmnet <- predict(final_model, newx = X_test)
+
+# Evaluate the model
+mse <- mean((predictions_glmnet - test_data$charges)^2)
+rmse <- sqrt(mse)
+
+
+r_squared_glmnet <- 1 - sum((test_data$charges - predictions_glmnet)^2) / sum((test_data$charges - mean(test_data$charges))^2)
+
+```
+
+### XGBOOST:
+
+XGBoost, or Extreme Gradient Boosting, is a powerful machine learning algorithm known for its efficiency and effectiveness in handling diverse datasets. The algorithm sequentially builds a series of decision trees, each correcting the errors of the previous one, ultimately creating a strong ensemble model. We create a grid of hyperparameter values, such as the learning rate (eta), maximum depth of trees (max_depth), and some others. For each combination of hyperparameters, the code then calculates the corresponding R-squared values, and finally we select the set of hyperparameters that yield the highest R-squared. This process aids in optimizing the XGBoost model's configuration for accurate predictions on the insurance dataset. 
+
+```{r, echo = FALSE}
+# Function to train and evaluate XGBoost model for a given set of hyperparameters
+train_and_evaluate <- function(params) {
+  nrounds <- 100
+  feature_names <- names(train_data[, -which(names(train_data) == "charges")])
+
+  # Convert training data to matrix with feature names
+  train_data_matrix <- as.matrix(train_data[,feature_names], features = feature_names)
+
+  # Convert test data to matrix with feature names
+  test_data_matrix <- as.matrix(test_data[, feature_names], features = feature_names)
+
+  model <- xgboost(
+    data = train_data_matrix,
+    label = train_data$charges,
+    params = params,
+    nrounds = nrounds,
+    verbose = 0
+  )
+  predictions_xgboost <- predict(model, newdata = test_data_matrix)
+  r_squared <- 1 - sum((test_data$charges - predictions_xgboost)^2) / sum((test_data$charges - mean(test_data$charges))^2)
+  return(data.frame(params, r_squared, predictions_xgboost))
+}
+
+# Create param_grid with age parameter
+param_grid <- expand.grid(
+  eta = c(0.01, 0.1),
+  max_depth = c(3, 6, 9),
+  min_child_weight = c(1, 3),
+  subsample = c(0.8, 1.0),
+  colsample_bytree = c(0.8, 1.0)
+)
+
+# Apply train_and_evaluate to each row in param_grid using do()
+results <- param_grid %>%
+  rowwise() %>%
+  do(train_and_evaluate(as.list(.)))
+
+# Select the row with the highest R-squared value
+best_row <- results[which.max(results$r_squared), ]
+predictions_xgboost <- results$predictions_xgboost
+r_squared_xgboost <- best_row$r_squared
+```
+### Random Forest:
+
+Random Forest is an ensemble learning algorithm widely used for both classification and regression tasks. It builds multiple decision trees during training and combines their predictions to enhance overall accuracy and robustness. The key concept lies in introducing randomness during both the construction of individual trees and the selection of features used for splitting nodes. This randomness helps reduce overfitting and improves the model's generalization performance. The final prediction is often obtained by averaging or taking a majority vote of the predictions made by individual trees. R provides the 'randomForest' package, which as the name suggests, provides the functionality to implement a Random Forest model.
+```{r, echo=FALSE}
+# Fit a random forest model
+rf_model <- randomForest(
+  charges ~ .,  # Use all predictors except the target variable
+  data = train_data
+)
+
+rf_predictions <- predict(rf_model, newdata = test_data)
+
+r_squared_rf <- 1 - sum((test_data$charges - rf_predictions)^2) / sum((test_data$charges - mean(test_data$charges))^2)
+
+```
+
+### Support Vector Machine: 
+SVM is a supervised learning algorithm that works by finding a hyperplane in the feature space that best separates different classes or, in the case of regression, predicts the target variable. The resulting SVM model is then used to make predictions on the test set, and performance metrics such as root mean squared error (RMSE) and R-squared are computed to assess the accuracy of the predictions. SVMs are particularly effective in handling non-linear relationships and are robust in high-dimensional spaces, making them suitable for various machine learning tasks. Here, we utilize the 'e1071' package in R to implement a Support Vector Machine (SVM) for regression. 
+
+```{r, echo=FALSE}
+library(e1071)
+
+svm_model <- svm(charges ~ age + sex + bmi + children + smoker + region, data = train_data)
+
+# Make predictions on the test_data
+svm_predictions <- predict(svm_model, newdata = test_data[, c("age", "sex", "bmi", "children", "smoker", "region")])
+
+rmse <- sqrt(mean((svm_predictions - test_data$charges)^2))
+r_squared_svm <- 1 - sum((test_data$charges - svm_predictions)^2) / sum((test_data$charges - mean(test_data$charges))^2)
+
+```
+
+```{r, echo=FALSE, warning=FALSE}
+#glmnet predictions has column s0, need to rename for ease of visualization
+# Assuming predictions_glmnet is a vector
+predictions_glmnet <- as.vector(predictions_glmnet)
+
+# Set names
+names(predictions_glmnet) <- "GLMNET"
+combined_data <- data.frame(
+  Actual = test_data$charges,
+  XGBOOST = predictions_xgboost,
+  SVM = svm_predictions,
+  RF = rf_predictions,
+  LM = lrprediction,
+  GLMNET = predictions_glmnet
+)
+
+combined_data_long <- gather(combined_data, key = "Model", value = "Predicted", -Actual)
+
+ggplot(combined_data_long, aes(x = Predicted, y = Actual)) +
+  geom_point(aes(color = Model), alpha = 0.8) +
+  geom_smooth(method = "lm", formula = y ~ x, color = "darkslategray", size = 1, se = FALSE, show.legend = FALSE) +
+  facet_wrap(~Model, scales = "fixed") +
+  ggtitle("Prediction vs Actual Charges for ML Models")+
+  theme(axis.text.x=element_blank(),
+        axis.ticks.x=element_blank())
+
+```
+
+# ANALYSIS OF RESULTS :
+```{r}
+
+# Create a data frame with model names and R-squared values
+model_names <- c("Linear Regression", "GLMNET", "SVM", "Random Forest","XGBoost")
+r_squared_values <- c(r_squared_lr, r_squared_glmnet, r_squared_svm, r_squared_rf, r_squared_xgboost)
+df <- data.frame(Model = model_names, R_squared = r_squared_values)
+
+# Plot the bar graph
+library(ggplot2)
+
+ggplot(df, aes(x = Model, y = R_squared, fill = Model)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  labs(title = "Comparison of R-squared Values",
+       x = "Models",
+       y = "R-squared") +
+  theme_minimal()
+
+```
+
+## DIDNT PRINT R-SQUARED ABOVE, DO ALL TOGETHER FOR COMPARISON
